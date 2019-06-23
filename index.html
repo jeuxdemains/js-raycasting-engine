@@ -1,0 +1,206 @@
+<html>
+    <head>
+        <script src="classes/Map.js"></script>
+        <script src="classes/Renderer.js"></script>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+
+    </head>
+    <body style="font-family: 'Courier New', Courier, monospace; font-size: 15px; background: black; color: white">
+        <div>
+            <span id="playerX"></span>
+            <span id="playerY"></span>
+            <span id="playerA"></span>
+            <span id="mapCoordX"></span>
+            <span id="mapCoordY"></span>
+            <input id="debugModeChkBox" type="checkbox"><span class="checkmark">Debug mode</span>
+        </div>
+        <canvas id="canvas" width="640" height="480" style="background-color: black; width: 180; position: absolute;"></canvas>
+        <canvas id="canvas3d" width="640" height="480" style="background-color: white; width: 1024"></canvas>
+    </body>
+
+    <script>
+        
+        var canvas      = document.getElementById("canvas");
+        var context     = canvas.getContext("2d");
+        var canvas3d    = document.getElementById("canvas3d");
+        var context3d   = canvas3d.getContext("2d");
+
+        var map = new Map();
+        var renderer = new Renderer(canvas3d.width, canvas3d.height, context, context3d);
+
+        var rendererDirty = false;
+
+        var stepX = 20; //renderer.blockW;
+        var stepY = 20; //renderer.blockH;
+
+        var playerPosX = 10 * renderer.blockW + (renderer.blockW / 2);
+        var playerPosY = 6 * renderer.blockH + (renderer.blockH / 2);
+        var playerPosA = -Math.PI / 2;
+
+        canvas.height = map.mapSpace.length * renderer.blockH;
+        canvas.width = map.mapSpace[0].length * renderer.blockW;
+
+        var keys = {};
+        window.onkeyup = function(e) { keys[e.keyCode] = false; }
+        window.onkeydown = function(e) { keys[e.keyCode] = true; }
+
+        setInterval(function(){
+            gameInput();
+            renderScene();
+        }, 50);
+
+        function gameInput()
+        {
+            let angle = 0;
+            let speed = 0;
+            let movementSpeedAmp = 0;
+            let rotationSpeedAmp = 0;
+            let strafeOn = false;
+            let strafe = 0;
+
+            //q strafe
+            if (keys[81])
+            {
+                strafeOn = true;
+            }
+
+            //up
+            if (keys[38])
+            {
+                speed = 1;
+                rendererDirty = true;
+            }
+
+            //down
+            if (keys[40])
+            {
+                speed = -1;
+                rendererDirty = true;
+            }
+
+            //left
+            if (keys[37])
+            {
+                angle = -1;
+
+                if (strafeOn) {
+                    strafe = -10;
+                    angle = 0;
+                }
+
+                rendererDirty = true;
+            }
+
+            //right
+            if (keys[39])
+            {
+                angle = 1;
+                strafe = 10;
+
+                if (strafeOn) {
+                    angle = 0;
+                }
+
+                rendererDirty = true;                    
+            }
+
+            //w run
+            if (keys[87])
+            {
+                movementSpeedAmp = 20;
+                rotationSpeedAmp = 3;
+                strafe *= 2;
+            }
+
+            playerPosA += (2 + rotationSpeedAmp) * angle * Math.PI / 180;
+            let oldPosX = playerPosX;
+            let oldPosY = playerPosY;
+
+            if (strafeOn)
+            {
+                playerPosX += strafe * Math.cos(playerPosA + Math.PI / 2);
+                playerPosY += strafe * Math.sin(playerPosA + Math.PI / 2);
+            }
+
+            playerPosX += speed * (stepX + movementSpeedAmp) * Math.cos(playerPosA);
+            playerPosY += speed * (stepY + movementSpeedAmp) * Math.sin(playerPosA);
+            
+            let coordsOnMap = map.pixelPosToCoordinate(Math.ceil(playerPosX), Math.ceil(playerPosY));
+            let x1 = Math.ceil(coordsOnMap[0]);
+            let y1 = Math.ceil(coordsOnMap[1]);
+
+            let coordsOfMap = map.coordinateToPixelPos(y1, x1);
+
+            if (map.mapSpace[x1][y1] == "#")
+            {
+                playerPosX = oldPosX;
+                playerPosY = oldPosY;
+            }
+        }
+
+        function renderScene()
+        {
+            //draw map
+            for (let block in map.mapSpace)
+            {
+                for (let line in map.mapSpace[block])
+                {
+                    let xCoord = parseFloat(line) * renderer.blockW;
+                    let yCoord = parseFloat(block) * renderer.blockH;
+
+                    //wall
+                    if (map.mapSpace[block][line] == "#")
+                    {
+                        renderer.drawBlock(xCoord, yCoord);
+                    }
+
+                    //entity
+                    if (map.mapSpace[block][line] == "@")
+                    {
+                        renderer.drawEntity(xCoord, yCoord);
+                    }
+
+                    //empty space
+                    if (map.mapSpace[block][line] == ".")
+                    {
+                        renderer.drawSpace(xCoord, yCoord);
+                    }
+                }
+            }
+
+            //draw player on map
+            renderer.drawPlayer(playerPosX, playerPosY, playerPosA);
+
+            // cast rays
+            //interceptions.wallsInterceptions && interceptions.entitiesInterceptions
+            let interceptions = renderer.castRays(playerPosX, playerPosY, playerPosA, true);
+
+            //draw 3D space based on casted rays
+            context3d.clearRect(0, 0, canvas3d.width, canvas3d.height);
+            renderer.drawCeilingAndFloor();
+            if (interceptions.wallsInterceptions !== undefined && interceptions.wallsInterceptions.length > 0)
+            {
+                renderer.drawScene(interceptions.wallsInterceptions, interceptions.entitiesInterceptions);
+            }
+
+            // if (interceptions.entitiesInterceptions !== undefined && interceptions.entitiesInterceptions.length > 0)
+            // {
+            //     renderer.drawEntitiesInScene(interceptions.entitiesInterceptions);
+            // }
+
+            //display stats
+            displayStats(playerPosX, playerPosY, playerPosA);
+        }
+
+        function displayStats(playerX, playerY, playerA)
+        {
+            $("#playerX").html("Player X: " + playerX.toFixed(2));
+            $("#playerY").html("Player Y: " + playerY.toFixed(2));
+            $("#playerA").html("Player A: " + playerA.toFixed(2));
+            let coordsOnMap = map.pixelPosToCoordinate(playerX, playerY);
+            $("#mapCoordX").html("Map coordinate X: " + Math.round(coordsOnMap[1]));
+            $("#mapCoordY").html("Map coordinate Y: " + Math.round(coordsOnMap[0]));
+        }
+        
+    </script>
+</html>
